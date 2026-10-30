@@ -33,3 +33,24 @@ def board_to_str(board: np.ndarray) -> str:
                 intermediate += "#"
         result.append(intermediate)
     return "\n".join(result)
+
+def lock(board: np.ndarray, shape: Shape, y: int, x: int) -> np.ndarray:
+    new_board = board.copy()
+    for i in shape:
+        new_board[i[0] + y,i[1] + x] = 1
+    return new_board
+
+def clear_lines(board: np.ndarray) -> tuple[np.ndarray, int]:
+    W = board.shape[1]
+    full = board.all(axis=1)
+    k = int(full.sum())
+    new_board = np.vstack([np.zeros((k, W), dtype= board.dtype), board[~full]])
+
+    return new_board, k
+
+def place(board: np.ndarray, shape: Shape, x: int) -> tuple[np.ndarray, int] | None:
+    y = drop_row(board, shape, x)
+    if y is None:
+        return None
+    new_board = lock(board, shape, y, x)
+    return clear_lines(new_board)

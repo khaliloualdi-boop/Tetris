@@ -1,8 +1,8 @@
-"""Tests for Milestone 1: pieces and rotations."""
-
 import pytest
 
 from tetris.pieces import PIECES, I, J, L, O, S, T, Z, distinct_rotations, normalize, rotate
+
+"""Tests for Milestone 1: pieces and rotations."""
 
 BASE_SHAPES = {"I": I, "O": O, "T": T, "S": S, "Z": Z, "L": L, "J": J}
 EXPECTED_COUNTS = {"O": 1, "I": 2, "S": 2, "Z": 2, "T": 4, "L": 4, "J": 4}
@@ -124,8 +124,7 @@ def test_pieces_values_are_piece_instances(name):
 
 def test_piece_is_frozen():
     with pytest.raises(dataclasses.FrozenInstanceError):
-        PIECES["T"].name = "X" 
-
+        PIECES["T"].name = "X" #type:ignore
 
 def test_piece_is_hashable():
     assert len({PIECES[k] for k in PIECES}) == 7
