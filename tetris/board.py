@@ -2,6 +2,7 @@ import numpy as np
 
 from tetris.pieces import Shape
 
+
 def empty_board(height: int = 20, width: int = 10) -> np.ndarray:
     return np.zeros((height, width), dtype=np.int8)
 

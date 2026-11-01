@@ -4,6 +4,7 @@ from tetris.pieces import PIECES, I, J, L, O, S, T, Z, distinct_rotations, norma
 
 """Tests for Milestone 1: pieces and rotations."""
 
+
 BASE_SHAPES = {"I": I, "O": O, "T": T, "S": S, "Z": Z, "L": L, "J": J}
 EXPECTED_COUNTS = {"O": 1, "I": 2, "S": 2, "Z": 2, "T": 4, "L": 4, "J": 4}
 
