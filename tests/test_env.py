@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from gymnasium import spaces
 
 from tetris.board import empty_board, place
 from tetris.env import (
@@ -11,6 +12,9 @@ from tetris.env import (
     encode,
     is_game_over,
     legal_actions,
+    TetrisEnv,
+    PIECE_NAMES,
+    reward
 )
 from tetris.pieces import PIECES
 
@@ -144,3 +148,224 @@ def test_game_over_when_top_rows_full(name):
     assert legal_actions(board, piece) == []
     assert is_game_over(board, piece)
     assert not action_mask(board, piece).any()
+
+
+def piece_sequence(env: TetrisEnv, seed: int, n: int) -> list[str]:
+    """First n pieces of a game: current, next, then further draws."""
+    env.reset(seed=seed)
+    assert env.current_piece is not None and env.next_piece is not None
+    seq = [env.current_piece, env.next_piece]
+    seq += [env._draw_piece() for _ in range(n - 2)]
+    return seq
+
+
+def random_legal_action(info: dict, rng: np.random.Generator) -> int:
+    return int(rng.choice(np.flatnonzero(info["action_mask"])))
+
+
+# --- constructor ---------------------------------------------------------------
+
+def test_invalid_randomizer_raises():
+    with pytest.raises(ValueError):
+        TetrisEnv(randomizer="bagg")
+
+
+def test_spaces():
+    env = TetrisEnv()
+    assert isinstance(env.action_space, spaces.Discrete)
+    assert isinstance(env.observation_space, spaces.Dict)
+    board_space = env.observation_space["board"]
+    piece_space = env.observation_space["piece"]
+    assert isinstance(board_space, spaces.Box)
+    assert isinstance(piece_space, spaces.Discrete)
+    assert env.action_space.n == 40
+    assert board_space.shape == (20, 10)
+    assert piece_space.n == 7
+
+
+# --- reset -----------------------------------------------------------------------
+
+def test_reset_observation():
+    env = TetrisEnv()
+    obs, _ = env.reset(seed=0)
+    assert env.observation_space.contains(obs)
+    assert not obs["board"].any()
+    assert 0 <= obs["piece"] < 7
+    assert PIECE_NAMES[obs["piece"]] == env.current_piece
+
+
+def test_reset_info():
+    env = TetrisEnv()
+    _, info = env.reset(seed=0)
+    assert env.current_piece is not None
+    expected = action_mask(env.board, PIECES[env.current_piece])
+    assert np.array_equal(info["action_mask"], expected)
+    assert info["lines"] == 0
+    assert info["total_lines"] == 0
+    assert info["pieces_placed"] == 0
+    assert info["next_piece"] == env.next_piece
+
+
+def test_reset_clears_previous_game():
+    env = TetrisEnv()
+    _, info = env.reset(seed=0)
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        _, _, _, _, info = env.step(random_legal_action(info, rng))
+    obs, info = env.reset(seed=1)
+    assert not obs["board"].any()
+    assert info["pieces_placed"] == 0
+
+
+# --- randomizer --------------------------------------------------------------------
+
+def test_same_seed_same_pieces():
+    assert piece_sequence(TetrisEnv(), 42, 50) == piece_sequence(TetrisEnv(), 42, 50)
+
+
+def test_different_seeds_differ():
+    assert piece_sequence(TetrisEnv(), 1, 50) != piece_sequence(TetrisEnv(), 2, 50)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_bag_property(seed):
+    seq = piece_sequence(TetrisEnv(), seed, 21)
+    for start in (0, 7, 14):
+        assert sorted(seq[start:start + 7]) == sorted(PIECE_NAMES)
+
+
+def test_uniform_randomizer_valid_names():
+    seq = piece_sequence(TetrisEnv(randomizer="uniform"), 0, 700)
+    assert set(seq) == set(PIECE_NAMES)
+    assert all(type(p) is str for p in seq)
+
+
+def test_bag_returns_plain_str():
+    seq = piece_sequence(TetrisEnv(), 0, 14)
+    assert all(type(p) is str for p in seq)
+
+
+# --- step: legal actions -------------------------------------------------------------
+
+def test_legal_step_outputs():
+    env = TetrisEnv()
+    _, info = env.reset(seed=0)
+    old_next = env.next_piece
+    action = random_legal_action(info, np.random.default_rng(0))
+    result = env.step(action)
+    assert len(result) == 5
+    obs, r, terminated, truncated, info = result
+    assert env.observation_space.contains(obs)
+    assert obs["board"].sum() == 4              # one piece, no line on an empty board
+    assert info["pieces_placed"] == 1
+    assert env.current_piece == old_next        # the queue advanced
+    assert info["next_piece"] == env.next_piece
+    assert not terminated and not truncated
+    assert r == reward(0, False)
+
+
+def test_step_clears_line():
+    env = TetrisEnv()
+    env.reset(seed=0)
+    env.board = empty_board()
+    env.board[19, 4:] = 1                       # bottom row full except columns 0..3
+    env.current_piece = "I"                     # rotation 0 = horizontal I
+    _, r, _, _, info = env.step(encode(0, 0, 10))
+    assert info["lines"] == 1
+    assert info["total_lines"] == 1
+    assert not env.board.any()
+    assert r == reward(1, False)
+
+
+# --- step: illegal actions --------------------------------------------------------------
+
+def test_missing_rotation_raises():
+    env = TetrisEnv()
+    env.reset(seed=0)
+    env.current_piece = "O"                     # only rotation 0 exists
+    with pytest.raises(ValueError):
+        env.step(encode(1, 0, 10))
+
+
+def test_out_of_bounds_column_raises():
+    env = TetrisEnv()
+    env.reset(seed=0)
+    env.current_piece = "I"
+    with pytest.raises(ValueError):
+        env.step(encode(0, 7, 10))              # horizontal I would reach column 10
+
+
+def test_illegal_step_leaves_state_unchanged():
+    env = TetrisEnv()
+    env.reset(seed=0)
+    env.current_piece = "O"
+    board_before = env.board.copy()
+    with pytest.raises(ValueError):
+        env.step(encode(3, 0, 10))
+    assert np.array_equal(env.board, board_before)
+    assert env.pieces_placed == 0
+    assert env.current_piece == "O"
+
+
+# --- full games -----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("seed", range(3))
+def test_random_game_terminates(seed):
+    env = TetrisEnv()
+    _, info = env.reset(seed=seed)
+    rng = np.random.default_rng(seed)
+    for _ in range(1000):
+        _, _, terminated, truncated, info = env.step(random_legal_action(info, rng))
+        if terminated or truncated:
+            break
+    assert terminated
+    assert not truncated
+    assert not info["action_mask"].any()        # no legal action left
+
+
+def test_truncation():
+    env = TetrisEnv(max_pieces=5)
+    _, info = env.reset(seed=0)
+    rng = np.random.default_rng(0)
+    for i in range(5):
+        _, _, terminated, truncated, info = env.step(random_legal_action(info, rng))
+        assert not terminated
+        assert truncated == (i == 4)
+
+
+def test_same_seed_same_game():
+    def play(seed):
+        env = TetrisEnv()
+        obs, info = env.reset(seed=seed)
+        boards = [obs["board"]]
+        for _ in range(10):
+            action = int(np.flatnonzero(info["action_mask"])[0])
+            obs, _, terminated, _, info = env.step(action)
+            boards.append(obs["board"])
+            if terminated:
+                break
+        return boards
+
+    a, b = play(7), play(7)
+    assert len(a) == len(b)
+    assert all(np.array_equal(x, y) for x, y in zip(a, b))
+
+
+# --- observation is a copy -------------------------------------------------------------------
+
+def test_observation_is_a_copy():
+    env = TetrisEnv()
+    obs, _ = env.reset(seed=0)
+    obs["board"][19, 0] = 1
+    assert env.board[19, 0] == 0
+
+
+# --- reward -------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lines, expected", [(0, 1), (1, 11), (2, 41), (3, 91), (4, 161)])
+def test_reward_values(lines, expected):
+    assert reward(lines, False) == expected
+
+
+def test_reward_game_over_penalty():
+    assert reward(0, True) == reward(0, False) - 5
