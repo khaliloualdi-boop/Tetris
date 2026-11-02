@@ -6,8 +6,8 @@ import gymnasium as gym
 from gymnasium import spaces
 from gymnasium.utils import env_checker
 
-from tetris.board import drop_row, place, empty_board
-from tetris.pieces import Piece, PIECES
+from tetris.board import drop_row, place, empty_board, board_to_str
+from tetris.pieces import Cell, Piece, PIECES
 
 PIECE_NAMES = ("I", "O", "T", "S", "J", "L", "Z")
 PIECE_DICT = {name: i for i, name in enumerate(PIECE_NAMES)}
@@ -69,8 +69,9 @@ class Observation(TypedDict):
 
 
 class TetrisEnv(gym.Env):
+    metadata = {"render_modes":["ansi", "human"], "render_fps": 4}
 
-    def __init__(self, height: int = 20, width: int = 10, max_pieces: int = 10000, randomizer: str = "bag"):
+    def __init__(self, height: int = 20, width: int = 10, max_pieces: int = 10000, randomizer: str = "bag", render_mode: str | None = None):
         super().__init__()
         self.height: int = height
         self.width: int = width
@@ -87,6 +88,11 @@ class TetrisEnv(gym.Env):
         self.last_lines: int = 0
         self.action_space = spaces.Discrete(4*width)
         self.observation_space = spaces.Dict({"board": spaces.Box(low=0, high=1, shape=(height,width), dtype=np.int8), "piece":spaces.Discrete(7)})
+        if render_mode is not None and not render_mode in TetrisEnv.metadata["render_modes"]:
+            raise ValueError(f"unexcpected render Mode, had {self.render_mode} expected 'ansi', 'human' or None")
+        self.render_mode = render_mode
+        self.last_cells : list[Cell] = []
+        self._renderer = None
 
     def _draw_piece(self) -> str:
         match self.randomizer:
@@ -110,6 +116,9 @@ class TetrisEnv(gym.Env):
         self.pieces_placed = 0
         self.total_lines = 0
         self.last_lines = 0
+        self.last_cells = []
+        if self.render_mode == "human":
+            self._render_frame()
         return self._observation(), self._info()
 
     def step(self, action: int) -> tuple[Observation, int, bool, bool, dict[str, Any]]:
@@ -118,7 +127,9 @@ class TetrisEnv(gym.Env):
         piece = PIECES[self.current_piece]
         if (k,x) not in legal_actions(self.board, piece):
             raise ValueError(f"illegal action {action} = (k={k}, x={x}) for piece {self.current_piece}")
-
+        y = drop_row(self.board, piece.rotations[k], x)
+        assert y is not None
+        self.last_cells = [(r + y, c + x) for r, c in piece.rotations[k]]
         output = place(self.board, piece.rotations[k], x)
         assert output is not None
         self.board, self.last_lines = output
@@ -132,7 +143,37 @@ class TetrisEnv(gym.Env):
         Reward = reward(self.last_lines, terminated)
         obs = self._observation()
         info = self._info()
+        if self.last_lines > 0:
+            self.last_cells = []
+        if self.render_mode == "human":
+            self._render_frame()
         return (obs, Reward, terminated, truncated, info)
+
+    def render(self):
+        match self.render_mode:
+            case "ansi":
+                return self._render_text()
+            case "human":
+                self._render_frame()
+            case None:
+                return None
+            case _:
+                raise ValueError(f"unexpected value for the render mode : {self.render_mode!r}")
+
+    def close(self) -> None:
+       if self._renderer is not None:
+           self._renderer.close()
+           self._renderer = None
+
+    def _render_text(self) -> str:
+        header = f"pieces placed: {self.pieces_placed}, lines: {self.total_lines}, current: {self.current_piece}, next: {self.next_piece}"
+        return f"{header}\n{board_to_str(self.board, self.last_cells)}"
+
+    def _render_frame(self) -> None:
+        if self._renderer is None:
+            from tetris.render import PygameRenderer
+            self._renderer = PygameRenderer(self.height, self.width, self.metadata["render_fps"])
+        self._renderer.draw(self.board, self.last_cells,current_piece=self.current_piece, next_piece=self.next_piece,pieces_placed=self.pieces_placed, total_lines=self.total_lines)
 
     def _observation(self) -> Observation:
         assert self.current_piece is not None

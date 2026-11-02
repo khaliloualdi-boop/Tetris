@@ -1,6 +1,7 @@
+from collections.abc import Iterable
 import numpy as np
 
-from tetris.pieces import Shape
+from tetris.pieces import Shape, Cell
 
 
 def empty_board(height: int = 20, width: int = 10) -> np.ndarray:
@@ -22,13 +23,16 @@ def drop_row(board: np.ndarray, shape: Shape, x: int) -> int | None:
     result = next(y for y in range(H) if not fits(board, shape, y+1, x))
     return result
 
-def board_to_str(board: np.ndarray) -> str:
+def board_to_str(board: np.ndarray, highlight: Iterable[tuple[int, int]]=()) -> str:
     H, W = board.shape
+    highlight = set(highlight)
     result = []
     for r in range(H):
         intermediate = ""
         for c in range(W):
-            if board[r, c] == 0:
+            if (r,c) in highlight:
+                intermediate += "@"
+            elif board[r, c] == 0:
                 intermediate += "."
             else:
                 intermediate += "#"
