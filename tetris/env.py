@@ -1,13 +1,17 @@
 from typing import TypedDict, Any
 
 import numpy as np
+
 import gymnasium as gym
 
 from gymnasium import spaces
+
 from gymnasium.utils import env_checker
 
 from tetris.board import drop_row, place, empty_board, board_to_str
+
 from tetris.pieces import Cell, Piece, PIECES
+
 
 PIECE_NAMES = ("I", "O", "T", "S", "J", "L", "Z")
 PIECE_DICT = {name: i for i, name in enumerate(PIECE_NAMES)}
